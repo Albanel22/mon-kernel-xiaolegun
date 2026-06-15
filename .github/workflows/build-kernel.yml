@@ -1,0 +1,176 @@
+name: Build Kernel Avancé (xiaoleGun Mod)
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compilation du Noyau par ${{ github.actor }}
+    runs-on: ubuntu-22.04
+    env:
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_HARDLINK: "true"
+    steps:
+    - name: Récupération du dépôt de build
+      uses: actions/checkout@v4
+
+    - name: Chargement de la tour de contrôle (config.env)
+      run: |
+        if [ -f "config.env" ]; then
+            while IFS= read -r line || [ -n "$line" ]; do
+                if [[ ! "$line" =~ ^# ]] && [[ ! -z "$line" ]]; then
+                    echo "$line" >> $GITHUB_ENV
+                fi
+            done < config.env
+            echo "[+] Fichier config.env ingéré avec succès."
+        else
+            echo "[-] Erreur critique : Fichier config.env manquant."
+            exit 1
+        fi
+
+    - name: Nettoyage et optimisation de l'espace disque
+      if: env.REMOVE_UNUSED_PACKAGES == 'true'
+      uses: jlumbroso/free-disk-space@main
+      with:
+        tool-cache: true
+        android: false
+        dotnet: true
+        haskell: true
+        large-packages: false
+        docker-images: true
+        swap-storage: false
+
+    - name: Configuration de la mémoire Swap (10 Go)
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 10
+
+    - name: Installation des dépendances Linux obligatoires
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y git ccache automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python3
+        mkdir -p $GITHUB_WORKSPACE/kernel_workspace
+
+    - name: Téléchargement du compilateur optimisé (Custom Clang)
+      if: env.USE_CUSTOM_CLANG == 'true'
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        echo "[+] Clonage de la Toolchain personnalisée depuis ${{ env.CUSTOM_CLANG_SOURCE }}..."
+        git clone ${{ env.CUSTOM_CLANG_SOURCE }} -b ${{ env.CUSTOM_CLANG_BRANCH }} clang-aosp --depth=1
+        echo "PATH=$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Téléchargement des compilateurs secondaires GCC
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        if [ "${{ env.ENABLE_GCC_ARM64 }}" = "true" ]; then
+            mkdir gcc-64
+            wget -O gcc-aarch64.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+            tar -C gcc-64/ -zxvf gcc-aarch64.tar.gz
+            echo "GCC_64_FLAG=CROSS_COMPILE=$GITHUB_WORKSPACE/kernel_workspace/gcc-64/bin/aarch64-linux-android-" >> $GITHUB_ENV
+        fi
+        if [ "${{ env.ENABLE_GCC_ARM32 }}" = "true" ]; then
+            mkdir gcc-32
+            wget -O gcc-arm.tar.gz https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz
+            tar -C gcc-32/ -zxvf gcc-arm.tar.gz
+            echo "GCC_32_FLAG=CROSS_COMPILE_ARM32=$GITHUB_WORKSPACE/kernel_workspace/gcc-32/bin/arm-linux-androideabi-" >> $GITHUB_ENV
+        fi
+
+    - name: Téléchargement du code source du Noyau (Kernel)
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} android-kernel --depth=1
+
+    - name: Intégration et Patching de KernelSU (${{ env.KERNELSU_TAG }})
+      if: env.ENABLE_KERNELSU == 'true'
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        echo "[+] Injection de KernelSU dans l'arborescence des drivers..."
+        git clone https://github.com/tiann/KernelSU.git -b ${{ env.KERNELSU_TAG }} drivers/kernelsu
+        
+        # Injection du Hook Non-GKI (fs/open.c) si méthode legacy choisie
+        if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
+            echo "[+] Application du hook d'ouverture fs/open.c..."
+            sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
+        fi
+
+        # Activation dans le Makefile des drivers
+        if [ -f "drivers/Makefile" ]; then
+            sed -i '/kernelsu/d' drivers/Makefile
+            echo "obj-y += kernelsu/" >> drivers/Makefile
+        fi
+
+    - name: Intégration et Patching Anti-Détection SusFS
+      if: env.ENABLE_SUSFS == 'true'
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        echo "[+] Téléchargement des patchs SusFS..."
+        git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
+        
+        cd android-kernel
+        # Copie des fichiers de l'extension SusFS directement dans le noyau
+        cp $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
+        
+        # Note : Si des patchs automatiques textuels existent pour ta version de noyau, 
+        # ils s'appliqueraient ici via la commande 'git apply' ou 'patch'.
+
+    - name: Configuration des Flags d'optimisation (Defconfig)
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        # Forçage des options requises pour KernelSU/OverlayFS dans le defconfig
+        CONFIG_PATH="arch/arm64/configs/${{ env.KERNEL_CONFIG }}"
+        if [ -f "$CONFIG_PATH" ]; then
+            if [ "${{ env.ADD_KPROBES_CONFIG }}" = "true" ]; then
+                sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
+                echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
+            fi
+            if [ "${{ env.ADD_OVERLAYFS_CONFIG }}" = "true" ]; then
+                sed -i '/CONFIG_OVERLAY_FS/d' $CONFIG_PATH
+                echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
+            fi
+        fi
+
+    - name: Exécution de la Compilation du Noyau (Moteur Clang + LLVM Tools)
+      env:
+        OBJCOPY: llvm-objcopy
+        STRIP: llvm-strip
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        export KBUILD_BUILD_HOST=Github-Action
+        export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
+        
+        # 1. Génération de la configuration brute (.config)
+        make -j$(nproc) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
+        
+        # 2. Lancement du build principal multi-cœurs
+        echo "[+] Lancement de la compilation globale..."
+        make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
+        
+        if [ "$BUILD_FAILED" = "true" ]; then
+            echo "[-] Échec du build multi-cœurs. Tentative en mode diagnostic mono-cœur (-j1)..."
+            make -j1 O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip
+        fi
+
+    - name: Empaquetage flashable universel avec AnyKernel3
+      run: |
+        cd $GITHUB_WORKSPACE/kernel_workspace
+        git clone ${{ env.CUSTOM_ANYKERNEL3_SOURCE }} -b ${{ env.CUSTOM_ANYKERNEL3_BRANCH }} AnyKernel3 --depth=1
+        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
+        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
+        sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
+        
+        # Copie de l'image de noyau générée
+        KERNEL_OUTPUT="android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}"
+        if [ -f "$KERNEL_OUTPUT" ]; then
+            cp "$KERNEL_OUTPUT" AnyKernel3/
+            echo "ZIP_READY=true" >> $GITHUB_ENV
+        else
+            echo "[-] Erreur : L'image finale du noyau n'a pas pu être trouvée. Compilation avortée."
+            exit 1
+        fi
+
+    - name: Exportation du fichier zip flashable (Artifact)
+      if: env.ZIP_READY == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: KernelSU_${{ env.KERNELSU_TAG }}_SusFS-${{ env.KERNEL_IMAGE_NAME }}
+        path: kernel_workspace/AnyKernel3/*
