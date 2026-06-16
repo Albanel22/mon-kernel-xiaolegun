@@ -98,16 +98,18 @@ jobs:
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 3. FORCE COMPILATION INTERNE (Ligne 1 du Makefile KSU)
+        # 3. FORCE COMPILATION INTERNE SANS LIEN KCONFIG (obj-y global)
         if [ -f "drivers/kernelsu/Makefile" ]; then
-            sed -i '1i CONFIG_KERNELSU=y' drivers/kernelsu/Makefile
             sed -i 's/obj-\$(CONFIG_KERNELSU)/obj-y/g' drivers/kernelsu/Makefile
-            echo "[+] Variable forcée à 'y' au sommet du Makefile interne de KernelSU."
+            sed -i 's/obj-\$(CONFIG_KSU)/obj-y/g' drivers/kernelsu/Makefile
+            sed -i '1i ccflags-y += -DCONFIG_KERNELSU=1 -DCONFIG_KSU=1' drivers/kernelsu/Makefile
+            echo "[+] Variable forcée à 'obj-y' et flags injectés au sommet du Makefile interne."
         fi
         
-        # 4. Injection du Hook fs/open.c
-        if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
+        # 4. Injection du Hook fs/open.c (Nettoyage préalable des anciens essais)
+        if [ -f "fs/open.c" ]; then
             echo "[+] Application du hook d'ouverture fs/open.c..."
+            sed -i '/ksu_handle_open/d' fs/open.c
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
@@ -116,13 +118,17 @@ jobs:
             sed -i '/kernelsu/d' drivers/Makefile
             echo "" >> drivers/Makefile
             echo "obj-y += kernelsu/" >> drivers/Makefile
-            echo "[+] KernelSU rattaché à la toute fin de drivers/Makefile."
+            echo "[+] KernelSU rattaché inconditionnellement à drivers/Makefile."
         fi
 
-        # 6. PROTECTION INTERNE GLOBALE (kconfig.h)
+        # 6. SÉCURISATION DES ARBRES DE CONFIGURATION (Kconfig et kconfig.h)
+        if [ -f "drivers/Kconfig" ]; then
+            sed -i '/endmenu/i \source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        fi
         if [ -f "include/linux/kconfig.h" ]; then
             echo "#define CONFIG_KERNELSU 1" >> include/linux/kconfig.h
-            echo "[+] Flag de préprocesseur injecté globalement dans kconfig.h"
+            echo "#define CONFIG_KSU 1" >> include/linux/kconfig.h
+            echo "[+] Prédéfinitions globales ajoutées à kconfig.h"
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -143,54 +149,44 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         CONFIG_PATH="arch/arm64/configs/${{ env.KERNEL_CONFIG }}"
         if [ -f "$CONFIG_PATH" ]; then
-            if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
-                sed -i '/CONFIG_KERNELSU/d' $CONFIG_PATH
-                echo "CONFIG_KERNELSU=y" >> $CONFIG_PATH
-            fi
-            if [ "${{ env.ADD_KPROBES_CONFIG }}" = "true" ]; then
-                sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
-                echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
-            fi
-            if [ "${{ env.ADD_OVERLAYFS_CONFIG }}" = "true" ]; then
-                sed -i '/CONFIG_OVERLAY_FS/d' $CONFIG_PATH
-                echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
-            fi
+            sed -i '/CONFIG_KERNELSU/d' $CONFIG_PATH
+            sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
+            sed -i '/CONFIG_OVERLAY_FS/d' $CONFIG_PATH
+            echo "CONFIG_KERNELSU=y" >> $CONFIG_PATH
+            echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
+            echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
         fi
 
     - name: Exécution de la Compilation du Noyau (Moteur Clang + LLVM Tools)
       env:
         OBJCOPY: llvm-objcopy
         STRIP: llvm-strip
-        KCFLAGS: "-DCONFIG_KERNELSU=1"
-        EXTRA_CFLAGS: "-DCONFIG_KERNELSU=1"
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # 1. Génération de la configuration initiale avec l'argument en ligne de commande
-        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }} CONFIG_KERNELSU=y
+        # 1. Génération de la configuration initiale (.config)
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
-        # 2. Ré-injection de sécurité pré-olddefconfig
-        if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
-            sed -i '/CONFIG_KERNELSU/d' out/.config
-            sed -i '/CONFIG_KPROBES/d' out/.config
-            sed -i '/CONFIG_OVERLAY_FS/d' out/.config
-            echo "CONFIG_KERNELSU=y" >> out/.config
-            echo "CONFIG_KPROBES=y" >> out/.config
-            echo "CONFIG_OVERLAY_FS=y" >> out/.config
-        fi
+        # 2. Ré-injection de sécurité post-génération brute
+        sed -i '/CONFIG_KERNELSU/d' out/.config
+        sed -i '/CONFIG_KPROBES/d' out/.config
+        sed -i '/CONFIG_OVERLAY_FS/d' out/.config
+        echo "CONFIG_KERNELSU=y" >> out/.config
+        echo "CONFIG_KPROBES=y" >> out/.config
+        echo "CONFIG_OVERLAY_FS=y" >> out/.config
         
-        # 3. Alignement des dépendances symboliques avec l'argument en ligne de commande
-        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig CONFIG_KERNELSU=y
+        # 3. Synchronisation finale des dépendances (olddefconfig)
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
         
-        # 4. Lancement du Build global (Argument CONFIG_KERNELSU=y injecté directement dans la commande d'exécution)
+        # 4. Lancement du Build global
         echo "[+] Lancement de la compilation globale forcée..."
-        make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip CONFIG_KERNELSU=y || BUILD_FAILED=true
+        make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
         
         if [ "$BUILD_FAILED" = "true" ]; then
             echo "[-] Échec du build multi-cœurs. Tentative en mode diagnostic mono-cœur (-j1)..."
-            make -j1 O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip CONFIG_KERNELSU=y
+            make -j1 O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip
         fi
 
     - name: Empaquetage flashable universel avec AnyKernel3
