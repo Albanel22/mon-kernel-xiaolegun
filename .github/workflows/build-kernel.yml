@@ -159,12 +159,18 @@ jobs:
         sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
         sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         
-        KERNEL_OUTPUT="android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}"
-        if [ -f "$KERNEL_OUTPUT" ]; then
-            cp "$KERNEL_OUTPUT" AnyKernel3/
+        echo "[+] Recherche automatique de l'image du noyau dans out/arch/arm64/boot/..."
+        ls -la android-kernel/out/arch/arm64/boot/
+        
+        # Détection automatique de n'importe quel fichier Image, Image.gz ou Image.gz-dtb
+        KERNEL_FOUND=$(find android-kernel/out/arch/arm64/boot/ -maxdepth 1 -type f -name "Image*" | head -n 1)
+        
+        if [ -n "$KERNEL_FOUND" ] && [ -f "$KERNEL_FOUND" ]; then
+            echo "[+] Noyau trouvé : $KERNEL_FOUND"
+            cp "$KERNEL_FOUND" AnyKernel3/Image.gz
             echo "ZIP_READY=true" >> $GITHUB_ENV
         else
-            echo "[-] Erreur : L'image finale du noyau n'a pas pu être trouvée. Compilation avortée."
+            echo "[-] Erreur critique : Aucun fichier débutant par 'Image' n'a été trouvé dans le dossier de build."
             exit 1
         fi
 
