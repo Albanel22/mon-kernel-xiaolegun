@@ -101,17 +101,21 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # Activation dans le Makefile des drivers
+        # 1. Déclaration standard du dossier racine kernelsu dans le Makefile des drivers
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
-            echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
+            echo "obj-y += kernelsu/" >> drivers/Makefile
         fi
 
-        # Liaison dans le Kconfig (Correction du chemin vers /kernel/)
+        # 2. Déclaration standard du Kconfig racine kernelsu
         if [ -f "drivers/Kconfig" ]; then
             sed -i '/kernelsu/d' drivers/Kconfig
-            echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         fi
+
+        # 3. Création des fichiers "Pont" pour guider proprement Kbuild vers le sous-dossier /kernel
+        echo 'obj-y += kernel/' > drivers/kernelsu/Makefile
+        echo 'source "drivers/kernelsu/kernel/Kconfig"' > drivers/kernelsu/Kconfig
 
     - name: Intégration et Patching Anti-Détection SusFS
       if: env.ENABLE_SUSFS == 'true'
@@ -121,7 +125,12 @@ jobs:
         git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
         
         cd android-kernel
-        cp $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
+        # Copie intelligente des fichiers SusFS directement là où se trouvent les sources actives de KernelSU
+        if [ -d "drivers/kernelsu/kernel" ]; then
+            cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/kernel/
+        else
+            cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
+        fi
 
     - name: Configuration des Flags d'optimisation (Defconfig)
       run: |
@@ -154,7 +163,7 @@ jobs:
         # 1. Génération de la configuration brute (.config)
         make -j$(nproc) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
-        # 1b. Injection de force post-génération brute
+        # 1b. Injection de force post-génération brute de sécurité
         if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
             echo "CONFIG_KERNELSU=y" >> out/.config
         fi
@@ -200,4 +209,3 @@ jobs:
       with:
         name: KernelSU_${{ env.KERNELSU_TAG }}_SusFS-${{ env.KERNEL_IMAGE_NAME }}
         path: kernel_workspace/AnyKernel3/*
-        
