@@ -98,27 +98,27 @@ jobs:
         # 1. Clonage de KernelSU dans un dossier temporaire externe sécurisé
         git clone https://github.com/tiann/KernelSU.git -b ${{ env.KERNELSU_TAG }} $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 2. Injection PHYSIQUE complète (Pas de lien symbolique qui casse l'architecture out-of-tree)
+        # 2. Injection PHYSIQUE complète
         mkdir -p drivers/kernelsu
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # Injection du Hook Non-GKI (fs/open.c) si méthode legacy choisie
+        # Injection du Hook Non-GKI (fs/open.c)
         if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
             echo "[+] Application du hook d'ouverture fs/open.c..."
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 3. Alignement strict et propre du Makefile des drivers
+        # 3. Alignement ultra-robuste du Makefile (Placé à la ligne 1 pour contourner les structures du constructeur)
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
-            echo "obj-y += kernelsu/" >> drivers/Makefile
+            sed -i '1i obj-y += kernelsu/' drivers/Makefile
         fi
 
-        # 4. Alignement strict du Kconfig des drivers (Insertion propre en fin de fichier de structure)
-        if [ -f "drivers/Kconfig" ]; then
-            sed -i '/kernelsu/d' drivers/Kconfig
-            sed -i '$i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        # 4. Alignement du Kconfig au niveau de la racine globale du noyau (Évite les conflits de sous-menus)
+        if [ -f "Kconfig" ]; then
+            sed -i '/kernelsu/d' Kconfig
+            echo 'source "drivers/kernelsu/Kconfig"' >> Kconfig
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -129,7 +129,6 @@ jobs:
         git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
         
         cd android-kernel
-        # Copie directe et physique dans le répertoire stable
         if [ -d "drivers/kernelsu" ]; then
             cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
             echo "[+] Fichiers SusFS copiés avec succès dans l'arborescence physique de KernelSU."
@@ -176,7 +175,7 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> out/.config
         fi
         
-        # 3. Traitement réglementaire par olddefconfig (remplit les sous-options par défaut de manière non-interactive)
+        # 3. Traitement réglementaire par olddefconfig
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
         
         # 4. Rapport de contrôle final (Validation visuelle dans les logs)
