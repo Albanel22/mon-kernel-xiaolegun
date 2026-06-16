@@ -107,7 +107,7 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 3. Alignement strict du Makefile des drivers (sans sous-chemins avec des slashes)
+        # 3. Alignement strict du Makefile des drivers
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
             echo "obj-y += kernelsu/" >> drivers/Makefile
@@ -127,7 +127,6 @@ jobs:
         git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
         
         cd android-kernel
-        # Grâce au lien symbolique, copier dans drivers/kernelsu cible directement la racine active du code de KernelSU
         if [ -d "drivers/kernelsu" ]; then
             cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
             echo "[+] Fichiers SusFS copiés avec succès dans l'arborescence KernelSU."
@@ -161,36 +160,27 @@ jobs:
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # 1. Génération de la configuration brute (.config)
-        make -j$(nproc) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
+        # 1. Génération de la configuration brute initiale (.config)
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
-        # Injection et maintien des flags de compilation obligatoires
-        apply_force_flags() {
-            local target_config=$1
-            sed -i '/CONFIG_KERNELSU/d' $target_config
-            sed -i '/CONFIG_KPROBES/d' $target_config
-            sed -i '/CONFIG_OVERLAY_FS/d' $target_config
-            echo "CONFIG_KERNELSU=y" >> $target_config
-            echo "CONFIG_KPROBES=y" >> $target_config
-            echo "CONFIG_OVERLAY_FS=y" >> $target_config
-        }
-
+        # 2. Injection UNIQUE des flags de force AVANT le traitement par olddefconfig
         if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
-            apply_force_flags out/.config
+            sed -i '/CONFIG_KERNELSU/d' out/.config
+            sed -i '/CONFIG_KPROBES/d' out/.config
+            sed -i '/CONFIG_OVERLAY_FS/d' out/.config
+            echo "CONFIG_KERNELSU=y" >> out/.config
+            echo "CONFIG_KPROBES=y" >> out/.config
+            echo "CONFIG_OVERLAY_FS=y" >> out/.config
         fi
         
-        # Validation réglementaire par le moteur de build
+        # 3. Traitement réglementaire par olddefconfig (remplit les sous-options par défaut sans poser de questions)
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
         
-        # Seconde couche de sécurité post-olddefconfig
-        if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
-            apply_force_flags out/.config
-        fi
-
-        echo "[+] État de contrôle final du fichier de configuration :"
+        # 4. Rapport de contrôle final (Validation visuelle dans les logs)
+        echo "[+] État de contrôle final et définitif du fichier de configuration :"
         grep -E "CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_OVERLAY_FS" out/.config || true
         
-        # 2. Lancement du build principal multi-cœurs
+        # 5. Lancement de la compilation globale (Aucun fichier de configuration n'est altéré après cette ligne)
         echo "[+] Lancement de la compilation globale..."
         make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
         
@@ -204,7 +194,7 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone ${{ env.CUSTOM_ANYKERNEL3_SOURCE }} -b ${{ env.CUSTOM_ANYKERNEL3_BRANCH }} AnyKernel3 --depth=1
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;g' AnyKernel3/anykernel.sh
+        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
         sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         
         KERNEL_OUTPUT="android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}"
