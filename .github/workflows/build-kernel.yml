@@ -108,20 +108,39 @@ jobs:
             echo "[+] Fichiers SusFS injectés avec succès."
         fi
 
-    - name: Configuration du Defconfig (Activation des options Kconfig)
+    - name: Configuration du Defconfig (Bannissement des verrous Motorola & Activation Kconfig)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         CONFIG_PATH="arch/arm64/configs/${{ env.KERNEL_CONFIG }}"
         if [ -f "$CONFIG_PATH" ]; then
+            echo "[+] Nettoyage des anciennes configurations..."
             sed -i '/CONFIG_KERNELSU/d' $CONFIG_PATH
             sed -i '/CONFIG_KSU/d' $CONFIG_PATH
             sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
             sed -i '/CONFIG_OVERLAY_FS/d' $CONFIG_PATH
+            sed -i '/CONFIG_MODULE_SIG/d' $CONFIG_PATH
+            sed -i '/CONFIG_KALLSYMS/d' $CONFIG_PATH
+            
+            echo "[+] Injection des pré-requis obligatoires pour KernelSU..."
             echo "CONFIG_KERNELSU=y" >> $CONFIG_PATH
             echo "CONFIG_KSU=y" >> $CONFIG_PATH
             echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
             echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
-            echo "[+] Options de configuration injectées proprement dans le defconfig."
+            
+            echo "[+] Activation de la cartographie complète du noyau..."
+            echo "CONFIG_KALLSYMS=y" >> $CONFIG_PATH
+            echo "CONFIG_KALLSYMS_ALL=y" >> $CONFIG_PATH
+            
+            echo "[+] Désactivation des verrous de signature LineageOS/Motorola (Anti-Bootloop)..."
+            echo "CONFIG_MODULE_SIG=n" >> $CONFIG_PATH
+            echo "CONFIG_MODULE_SIG_FORCE=n" >> $CONFIG_PATH
+            echo "CONFIG_MODULE_SIG_PERMISSIVE=y" >> $CONFIG_PATH
+            echo "CONFIG_MODULE_SIG_ALL=n" >> $CONFIG_PATH
+            
+            echo "[+] Configuration finale du defconfig validée."
+        else
+          echo "[-] Erreur critique : Le fichier defconfig spécifié est introuvable."
+          exit 1
         fi
 
     - name: Exécution de la Compilation du Noyau (Moteur Clang + LLVM Tools)
