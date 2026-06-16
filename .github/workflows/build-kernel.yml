@@ -103,22 +103,28 @@ jobs:
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
+        # 3. Force locale inconditionnelle (Évite le bypass de olddefconfig)
+        if [ -f "drivers/kernelsu/Makefile" ]; then
+            sed -i '1i CONFIG_KERNELSU=y' drivers/kernelsu/Makefile
+            echo "[+] Variable CONFIG_KERNELSU verrouillée à 'y' directement dans le sous-Makefile."
+        fi
+        
         # Injection du Hook Non-GKI (fs/open.c)
         if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
             echo "[+] Application du hook d'ouverture fs/open.c..."
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 3. Alignement ultra-robuste du Makefile (Placé à la ligne 1 pour contourner les structures du constructeur)
+        # 4. Alignement du Makefile des drivers (au tout début)
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
             sed -i '1i obj-y += kernelsu/' drivers/Makefile
         fi
 
-        # 4. Alignement du Kconfig au niveau de la racine globale du noyau (Évite les conflits de sous-menus)
-        if [ -f "Kconfig" ]; then
-            sed -i '/kernelsu/d' Kconfig
-            echo 'source "drivers/kernelsu/Kconfig"' >> Kconfig
+        # 5. Injection du Kconfig directement au début de la structure "Device Drivers"
+        if [ -f "drivers/Kconfig" ]; then
+            sed -i '/kernelsu/d' drivers/Kconfig
+            sed -i '/menu "Device Drivers"/a source "drivers/kernelsu/Kconfig"' drivers/Kconfig
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
