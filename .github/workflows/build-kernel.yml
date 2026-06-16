@@ -98,11 +98,12 @@ jobs:
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 3. FORCE COMPILATION DANS LE SOUS-MAKEFILE
+        # 3. FORCE ULTIME DANS LE SOUS-MAKEFILE KSU
         if [ -f "drivers/kernelsu/Makefile" ]; then
-            sed -i 's/obj-\$(CONFIG_KERNELSU)/obj-y/g' drivers/kernelsu/Makefile
-            sed -i '1i ccflags-y += -DCONFIG_KERNELSU=1' drivers/kernelsu/Makefile
-            echo "[+] Mode Inconditionnel activé sur le Makefile de KernelSU."
+            echo "" >> drivers/kernelsu/Makefile
+            echo "obj-y += kernelsu.o" >> drivers/kernelsu/Makefile
+            echo "ccflags-y += -DCONFIG_KERNELSU=1" >> drivers/kernelsu/Makefile
+            echo "[+] Mode Inconditionnel forcé sur le Makefile interne de KernelSU."
         fi
         
         # 4. Injection du Hook fs/open.c
@@ -111,7 +112,7 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 5. INJECTION FORCE DANS DRIVERS/MAKEFILE (En fin de fichier pour éviter l'écrasement)
+        # 5. SÉCURISATION DRIVERS/MAKEFILE
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
             echo "" >> drivers/Makefile
@@ -119,11 +120,12 @@ jobs:
             echo "[+] KernelSU rattaché à la toute fin de drivers/Makefile."
         fi
 
-        # 6. INJECTION KCONFIG POUR SÉCURISER OLDDEFCONFIG
-        if [ -f "drivers/Kconfig" ]; then
-            sed -i '/kernelsu/d' drivers/Kconfig
-            sed -i '/menu "Device Drivers"/a source "drivers/kernelsu/Kconfig"' drivers/Kconfig
-            echo "[+] Kconfig de KernelSU injecté au début de Device Drivers."
+        # 6. ENRACINEMENT KCONFIG DANS L'ARCHITECTURE GLOBALE ARM64
+        if [ -f "arch/arm64/Kconfig" ]; then
+            sed -i '/kernelsu/d' arch/arm64/Kconfig
+            echo "" >> arch/arm64/Kconfig
+            echo 'source "drivers/kernelsu/Kconfig"' >> arch/arm64/Kconfig
+            echo "[+] Déclaration Kconfig ancrée au niveau Master (arch/arm64/Kconfig)."
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -162,6 +164,8 @@ jobs:
       env:
         OBJCOPY: llvm-objcopy
         STRIP: llvm-strip
+        KCFLAGS: "-DCONFIG_KERNELSU=1"
+        EXTRA_CFLAGS: "-DCONFIG_KERNELSU=1"
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         export KBUILD_BUILD_HOST=Github-Action
@@ -197,7 +201,7 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone ${{ env.CUSTOM_ANYKERNEL3_SOURCE }} -b ${{ env.CUSTOM_ANYKERNEL3_BRANCH }} AnyKernel3 --depth=1
         sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;g' AnyKernel3/anykernel.sh
+        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
         sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         
         KERNEL_OUTPUT="android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}"
