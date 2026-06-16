@@ -93,13 +93,15 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         echo "[+] Récupération propre des sources KernelSU..."
-        rm -rf drivers/kernelsu drivers/kernelsu-repo
+        rm -rf drivers/kernelsu drivers/kernelsu-repo $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 1. Clonage dans un dossier temporaire externe
-        git clone https://github.com/tiann/KernelSU.git -b ${{ env.KERNELSU_TAG }} drivers/kernelsu-repo
+        # 1. Clonage de KernelSU dans un dossier temporaire externe sécurisé
+        git clone https://github.com/tiann/KernelSU.git -b ${{ env.KERNELSU_TAG }} $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 2. Création du lien symbolique "plat" requis par Kbuild
-        ln -sf kernelsu-repo/kernel drivers/kernelsu
+        # 2. Injection PHYSIQUE complète (Pas de lien symbolique qui casse l'architecture out-of-tree)
+        mkdir -p drivers/kernelsu
+        cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
+        rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
         # Injection du Hook Non-GKI (fs/open.c) si méthode legacy choisie
         if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
@@ -107,13 +109,13 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 3. Alignement strict du Makefile des drivers
+        # 3. Alignement strict et propre du Makefile des drivers
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
             echo "obj-y += kernelsu/" >> drivers/Makefile
         fi
 
-        # 4. Alignement strict du Kconfig des drivers
+        # 4. Alignement strict du Kconfig des drivers (Insertion propre en fin de fichier de structure)
         if [ -f "drivers/Kconfig" ]; then
             sed -i '/kernelsu/d' drivers/Kconfig
             sed -i '$i source "drivers/kernelsu/Kconfig"' drivers/Kconfig
@@ -127,9 +129,10 @@ jobs:
         git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
         
         cd android-kernel
+        # Copie directe et physique dans le répertoire stable
         if [ -d "drivers/kernelsu" ]; then
             cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
-            echo "[+] Fichiers SusFS copiés avec succès dans l'arborescence KernelSU."
+            echo "[+] Fichiers SusFS copiés avec succès dans l'arborescence physique de KernelSU."
         fi
 
     - name: Configuration des Flags d'optimisation (Defconfig)
@@ -173,14 +176,14 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> out/.config
         fi
         
-        # 3. Traitement réglementaire par olddefconfig (remplit les sous-options par défaut sans poser de questions)
+        # 3. Traitement réglementaire par olddefconfig (remplit les sous-options par défaut de manière non-interactive)
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
         
         # 4. Rapport de contrôle final (Validation visuelle dans les logs)
         echo "[+] État de contrôle final et définitif du fichier de configuration :"
         grep -E "CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_OVERLAY_FS" out/.config || true
         
-        # 5. Lancement de la compilation globale (Aucun fichier de configuration n'est altéré après cette ligne)
+        # 5. Lancement de la compilation globale
         echo "[+] Lancement de la compilation globale..."
         make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
         
