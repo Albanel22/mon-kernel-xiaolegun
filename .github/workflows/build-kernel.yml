@@ -93,11 +93,7 @@ jobs:
         rm -rf drivers/kernelsu
         
         echo "[+] Appel du script d'installation officiel de KernelSU..."
-        # Utilisation de la méthode recommandée par l'équipe de développement officielle
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s ${{ env.KERNELSU_TAG }}
-        
-        # NOTE : Si tu compiles la version "KernelSU-Next", commente la ligne du dessus et décommente celle-ci :
-        # curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s ${{ env.KERNELSU_TAG }}
 
     - name: Intégration et Patching Anti-Détection SusFS
       if: env.ENABLE_SUSFS == 'true'
@@ -134,9 +130,12 @@ jobs:
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # Définition de la commande de build standardisée sans arguments d'écrasement en ligne de commande
-        # L'ajout de HOSTCFLAGS évite le crash des scripts DTC sur Ubuntu 22.04
-        BASE_MAKE_CMD="make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip HOSTCFLAGS=-Wno-error HOSTCXXFLAGS=-Wno-error"
+        # Récupération et forçage du binaire DTC propre du système Ubuntu (Évite l'Error 139)
+        SYS_DTC=$(which dtc)
+        echo "[+] Utilisation du DTC système trouvé ici : $SYS_DTC"
+        
+        # Définition de la commande de build globale
+        BASE_MAKE_CMD="make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip HOSTCFLAGS=-Wno-error HOSTCXXFLAGS=-Wno-error DTC=$SYS_DTC"
         
         echo "[+] Étape 1 : Génération de la configuration initiale (.config)"
         $BASE_MAKE_CMD ${{ env.KERNEL_CONFIG }}
