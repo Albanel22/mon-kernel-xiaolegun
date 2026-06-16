@@ -36,7 +36,6 @@ jobs:
           exit 1
         fi
 
-
     - name: Nettoyage et optimisation de l'espace disque
       if: env.REMOVE_UNUSED_PACKAGES == 'true'
       uses: jlumbroso/free-disk-space@main
@@ -66,7 +65,6 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         echo "[+] Clonage de la Toolchain personnalisée depuis ${{ env.CUSTOM_CLANG_SOURCE }}..."
         git clone ${{ env.CUSTOM_CLANG_SOURCE }} -b ${{ env.CUSTOM_CLANG_BRANCH }} clang-aosp --depth=1
-        # LIGNE CORRIGÉE CI-DESSOUS (Méthode officielle GitHub Path)
         echo "$GITHUB_WORKSPACE/kernel_workspace/clang-aosp/bin" >> $GITHUB_PATH
 
     - name: Téléchargement des compilateurs secondaires GCC
@@ -103,10 +101,16 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # Activation dans le Makefile des drivers (Correction du chemin vers /kernel)
+        # Activation dans le Makefile des drivers
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
             echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
+        fi
+
+        # Liaison dans le Kconfig pour enregistrer l'option auprès du compilateur
+        if [ -f "drivers/Kconfig" ]; then
+            sed -i '/kernelsu/d' drivers/Kconfig
+            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -117,18 +121,17 @@ jobs:
         git clone ${{ env.SUSFS_PATCH_SOURCE }} -b ${{ env.SUSFS_PATCH_BRANCH }} susfs-src --depth=1
         
         cd android-kernel
-        # Copie des fichiers de l'extension SusFS directement dans le noyau
         cp $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
-        
-        # Note : Si des patchs automatiques textuels existent pour ta version de noyau, 
-        # ils s'appliqueraient ici via la commande 'git apply' ou 'patch'.
 
     - name: Configuration des Flags d'optimisation (Defconfig)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        # Forçage des options requises pour KernelSU/OverlayFS dans le defconfig
         CONFIG_PATH="arch/arm64/configs/${{ env.KERNEL_CONFIG }}"
         if [ -f "$CONFIG_PATH" ]; then
+            if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
+                sed -i '/CONFIG_KERNELSU/d' $CONFIG_PATH
+                echo "CONFIG_KERNELSU=y" >> $CONFIG_PATH
+            fi
             if [ "${{ env.ADD_KPROBES_CONFIG }}" = "true" ]; then
                 sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
                 echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
@@ -151,6 +154,20 @@ jobs:
         # 1. Génération de la configuration brute (.config)
         make -j$(nproc) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
+        # 1b. Ceinture et bretelles : Injection de force post-génération brute
+        if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
+            echo "CONFIG_KERNELSU=y" >> out/.config
+        fi
+        if [ "${{ env.ADD_KPROBES_CONFIG }}" = "true" ]; then
+            echo "CONFIG_KPROBES=y" >> out/.config
+        fi
+        if [ "${{ env.ADD_OVERLAYFS_CONFIG }}" = "true" ]; then
+            echo "CONFIG_OVERLAY_FS=y" >> out/.config
+        fi
+        
+        # Validation et alignement final des options
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
+        
         # 2. Lancement du build principal multi-cœurs
         echo "[+] Lancement de la compilation globale..."
         make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
@@ -168,7 +185,6 @@ jobs:
         sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
         sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
         
-        # Copie de l'image de noyau générée
         KERNEL_OUTPUT="android-kernel/out/arch/arm64/boot/${{ env.KERNEL_IMAGE_NAME }}"
         if [ -f "$KERNEL_OUTPUT" ]; then
             cp "$KERNEL_OUTPUT" AnyKernel3/
