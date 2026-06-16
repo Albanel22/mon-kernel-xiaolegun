@@ -5,7 +5,7 @@ on:
 jobs:
   build:
     name: Compilation du Noyau par ${{ github.actor }}
-    runs-on: ubuntu-22.04
+    runs-runs-on: ubuntu-22.04
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
@@ -98,12 +98,11 @@ jobs:
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 3. FORCE ULTIME DANS LE SOUS-MAKEFILE KSU
+        # 3. FORCE COMPILATION INTERNE (Ligne 1 du Makefile KSU)
         if [ -f "drivers/kernelsu/Makefile" ]; then
-            echo "" >> drivers/kernelsu/Makefile
-            echo "obj-y += kernelsu.o" >> drivers/kernelsu/Makefile
-            echo "ccflags-y += -DCONFIG_KERNELSU=1" >> drivers/kernelsu/Makefile
-            echo "[+] Mode Inconditionnel forcé sur le Makefile interne de KernelSU."
+            sed -i '1i CONFIG_KERNELSU=y' drivers/kernelsu/Makefile
+            sed -i 's/obj-\$(CONFIG_KERNELSU)/obj-y/g' drivers/kernelsu/Makefile
+            echo "[+] Variable forcée à 'y' au sommet du Makefile interne de KernelSU."
         fi
         
         # 4. Injection du Hook fs/open.c
@@ -120,12 +119,10 @@ jobs:
             echo "[+] KernelSU rattaché à la toute fin de drivers/Makefile."
         fi
 
-        # 6. ENRACINEMENT KCONFIG DANS L'ARCHITECTURE GLOBALE ARM64
-        if [ -f "arch/arm64/Kconfig" ]; then
-            sed -i '/kernelsu/d' arch/arm64/Kconfig
-            echo "" >> arch/arm64/Kconfig
-            echo 'source "drivers/kernelsu/Kconfig"' >> arch/arm64/Kconfig
-            echo "[+] Déclaration Kconfig ancrée au niveau Master (arch/arm64/Kconfig)."
+        # 6. PROTECTION INTERNE GLOBALE (kconfig.h)
+        if [ -f "include/linux/kconfig.h" ]; then
+            echo "#define CONFIG_KERNELSU 1" >> include/linux/kconfig.h
+            echo "[+] Flag de préprocesseur injecté globalement dans kconfig.h"
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -171,8 +168,8 @@ jobs:
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # 1. Génération de la configuration initiale
-        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
+        # 1. Génération de la configuration initiale avec l'argument en ligne de commande
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }} CONFIG_KERNELSU=y
         
         # 2. Ré-injection de sécurité pré-olddefconfig
         if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
@@ -184,16 +181,16 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> out/.config
         fi
         
-        # 3. Alignement des dépendances symboliques
-        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
+        # 3. Alignement des dépendances symboliques avec l'argument en ligne de commande
+        make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig CONFIG_KERNELSU=y
         
-        # 4. Lancement du Build global
-        echo "[+] Lancement de la compilation globale..."
-        make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
+        # 4. Lancement du Build global (Argument CONFIG_KERNELSU=y injecté directement dans la commande d'exécution)
+        echo "[+] Lancement de la compilation globale forcée..."
+        make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip CONFIG_KERNELSU=y || BUILD_FAILED=true
         
         if [ "$BUILD_FAILED" = "true" ]; then
             echo "[-] Échec du build multi-cœurs. Tentative en mode diagnostic mono-cœur (-j1)..."
-            make -j1 O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip
+            make -j1 O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip CONFIG_KERNELSU=y
         fi
 
     - name: Empaquetage flashable universel avec AnyKernel3
