@@ -18,14 +18,9 @@ jobs:
       run: |
         if [ -f "config.env" ]; then
           while IFS= read -r line || [ -n "$line" ]; do
-            # 1. Supprimer les retours à la ligne invisibles de Windows (\r)
             clean_line=$(echo "$line" | tr -d '\r')
-            # 2. Supprimer les commentaires en fin de ligne (#...)
             clean_line=$(echo "$clean_line" | sed 's/#.*//')
-            # 3. Supprimer les espaces inutiles au début et à la fin
             clean_line=$(echo "$clean_line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-            
-            # Si la ligne contient une affectation (un "=") et n'est pas vide, on l'exporte
             if [ -n "$clean_line" ] && [[ "$clean_line" == *=* ]]; then
               echo "$clean_line" >> $GITHUB_ENV
             fi
@@ -95,36 +90,32 @@ jobs:
         echo "[+] Récupération propre des sources KernelSU..."
         rm -rf drivers/kernelsu drivers/kernelsu-repo $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 1. Clonage de KernelSU dans un dossier temporaire externe sécurisé
+        # 1. Clonage temporaire
         git clone https://github.com/tiann/KernelSU.git -b ${{ env.KERNELSU_TAG }} $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 2. Injection PHYSIQUE complète
+        # 2. Copie physique des fichiers
         mkdir -p drivers/kernelsu
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 3. Force locale inconditionnelle (Évite le bypass de olddefconfig)
+        # 3. FORCE COMPILATION (Brute-Force du sous-Makefile)
         if [ -f "drivers/kernelsu/Makefile" ]; then
-            sed -i '1i CONFIG_KERNELSU=y' drivers/kernelsu/Makefile
-            echo "[+] Variable CONFIG_KERNELSU verrouillée à 'y' directement dans le sous-Makefile."
+            sed -i 's/obj-\$(CONFIG_KERNELSU)/obj-y/g' drivers/kernelsu/Makefile
+            sed -i '1i ccflags-y += -DCONFIG_KERNELSU=1' drivers/kernelsu/Makefile
+            echo "[+] Mode Inconditionnel activé sur le Makefile de KernelSU."
         fi
         
-        # Injection du Hook Non-GKI (fs/open.c)
+        # 4. Injection du Hook fs/open.c
         if [ "${{ env.KSU_INSTALL_METHOD }}" = "legacy" ] && [ -f "fs/open.c" ]; then
             echo "[+] Application du hook d'ouverture fs/open.c..."
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 4. Alignement du Makefile des drivers (au tout début)
-        if [ -f "drivers/Makefile" ]; then
-            sed -i '/kernelsu/d' drivers/Makefile
-            sed -i '1i obj-y += kernelsu/' drivers/Makefile
-        fi
-
-        # 5. Injection du Kconfig directement au début de la structure "Device Drivers"
-        if [ -f "drivers/Kconfig" ]; then
-            sed -i '/kernelsu/d' drivers/Kconfig
-            sed -i '/menu "Device Drivers"/a source "drivers/kernelsu/Kconfig"' drivers/Kconfig
+        # 5. BYPASS TOTAL DU MAKEFILE DES DRIVERS via le Root Makefile maître
+        if [ -f "Makefile" ]; then
+            echo "" >> Makefile
+            echo "drivers-y += drivers/kernelsu/" >> Makefile
+            echo "[+] Sécurisation de l'arborescence : KernelSU rattaché directement au Root Makefile."
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -137,7 +128,7 @@ jobs:
         cd android-kernel
         if [ -d "drivers/kernelsu" ]; then
             cp -r $GITHUB_WORKSPACE/kernel_workspace/susfs-src/kernel/* ./drivers/kernelsu/
-            echo "[+] Fichiers SusFS copiés avec succès dans l'arborescence physique de KernelSU."
+            echo "[+] Fichiers SusFS injectés avec succès."
         fi
 
     - name: Configuration des Flags d'optimisation (Defconfig)
@@ -168,10 +159,10 @@ jobs:
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # 1. Génération de la configuration brute initiale (.config)
+        # 1. Génération de la configuration initiale
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
-        # 2. Injection UNIQUE des flags de force AVANT le traitement par olddefconfig
+        # 2. Ré-injection de sécurité pré-olddefconfig
         if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
             sed -i '/CONFIG_KERNELSU/d' out/.config
             sed -i '/CONFIG_KPROBES/d' out/.config
@@ -181,14 +172,10 @@ jobs:
             echo "CONFIG_OVERLAY_FS=y" >> out/.config
         fi
         
-        # 3. Traitement réglementaire par olddefconfig
+        # 3. Alignement des dépendances symboliques
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig
         
-        # 4. Rapport de contrôle final (Validation visuelle dans les logs)
-        echo "[+] État de contrôle final et définitif du fichier de configuration :"
-        grep -E "CONFIG_KERNELSU|CONFIG_KPROBES|CONFIG_OVERLAY_FS" out/.config || true
-        
-        # 5. Lancement de la compilation globale
+        # 4. Lancement du Build global
         echo "[+] Lancement de la compilation globale..."
         make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip || BUILD_FAILED=true
         
