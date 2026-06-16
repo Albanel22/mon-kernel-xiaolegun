@@ -96,32 +96,39 @@ jobs:
         cp -r $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp/kernel/* drivers/kernelsu/
         rm -rf $GITHUB_WORKSPACE/kernel_workspace/KernelSU-tmp
         
-        # 2. FORCE ABSOLU DU MAKEFILE INTERNE (obj-y global et remplacement des variables conditionnelles)
+        # 2. FORCE TOTAL SUR LE MAKEFILE INTERNE (Contourne les structures conditionnelles et ifeq)
         if [ -f "drivers/kernelsu/Makefile" ]; then
             sed -i 's/obj-\$(CONFIG_KERNELSU)/obj-y/g' drivers/kernelsu/Makefile
             sed -i 's/obj-\$(CONFIG_KSU)/obj-y/g' drivers/kernelsu/Makefile
             sed -i 's/kernelsu-\$(CONFIG_KERNELSU)/kernelsu-y/g' drivers/kernelsu/Makefile
             sed -i 's/ksu-\$(CONFIG_KSU)/ksu-y/g' drivers/kernelsu/Makefile
+            sed -i 's/ifeq (\$(CONFIG_KERNELSU),y)/ifeq (y,y)/g' drivers/kernelsu/Makefile
+            sed -i 's/ifeq (\$(CONFIG_KSU),y)/ifeq (y,y)/g' drivers/kernelsu/Makefile
             sed -i '1i ccflags-y += -DCONFIG_KERNELSU=1 -DCONFIG_KSU=1' drivers/kernelsu/Makefile
-            echo "[+] Compilation forcée en obj-y et flags ccflags injectés."
+            echo "[+] Fichier drivers/kernelsu/Makefile configuré en mode inconditionnel."
         fi
         
-        # 3. Injection du Hook fs/open.c avec nettoyage strict préalable
+        # 3. Injection du Hook fs/open.c (avec nettoyage de sécurité préalable)
         if [ -f "fs/open.c" ]; then
             echo "[+] Application propre du hook d'ouverture fs/open.c..."
             sed -i '/ksu_handle_open/d' fs/open.c
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # 4. SÉCURISATION DRIVERS/MAKEFILE EN LIGNE 1 (Évite les blocs ifeq mort-nés à la fin du fichier)
+        # 4. ANCRAGE DE SÉCURITÉ DANS DRIVERS/MAKEFILE (Juste après la compilation du framework de base)
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
-            sed -i '1i obj-y += kernelsu/' drivers/Makefile
-            echo "[+] KernelSU rattaché en priorité absolue (Ligne 1) dans drivers/Makefile."
+            sed -i '/obj-y.*base/a obj-y += kernelsu/' drivers/Makefile
+            echo "[+] Liaison KernelSU ancrée de manière permanente après le sous-système 'base'."
         fi
 
-        # 5. SÉCURISATION KCONFIG & HEADERS GLOBALS
-        echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+        # 5. SÉCURISATION ANCRAGE KCONFIG (Via l'architecture globale ARM64 pour éviter les exclusions)
+        if [ -f "arch/arm64/Kconfig" ]; then
+            sed -i 's|source "drivers/Kconfig"|source "drivers/Kconfig"\nsource "drivers/kernelsu/Kconfig"|g' arch/arm64/Kconfig
+            echo "[+] Déclaration Kconfig injectée au niveau de la racine d'architecture arm64."
+        fi
+
+        # 6. SÉCURISATION DES HEADERS GLOBALS
         if [ -f "include/linux/kconfig.h" ]; then
             echo "#define CONFIG_KERNELSU 1" >> include/linux/kconfig.h
             echo "#define CONFIG_KSU 1" >> include/linux/kconfig.h
@@ -164,10 +171,10 @@ jobs:
         export KBUILD_BUILD_HOST=Github-Action
         export KBUILD_BUILD_USER=$(echo ${{ github.actor }} | tr A-Z a-z)
         
-        # 1. Génération de la configuration initiale (.config) avec forçage argument
+        # 1. Génération de la configuration brute avec flags passés en arguments durs
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }} CONFIG_KERNELSU=y CONFIG_KSU=y
         
-        # 2. Ré-injection post-génération brute
+        # 2. Ré-injection de protection post-génération brute
         sed -i '/CONFIG_KERNELSU/d' out/.config
         sed -i '/CONFIG_KSU/d' out/.config
         sed -i '/CONFIG_KPROBES/d' out/.config
@@ -177,10 +184,10 @@ jobs:
         echo "CONFIG_KPROBES=y" >> out/.config
         echo "CONFIG_OVERLAY_FS=y" >> out/.config
         
-        # 3. Synchronisation finale (olddefconfig) avec maintien des variables sur la ligne de commande
+        # 3. Synchronisation stricte (.config -> include/config/auto.conf)
         make O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip olddefconfig CONFIG_KERNELSU=y CONFIG_KSU=y
         
-        # 4. Lancement de la compilation globale avec écrasement des variables d'environnement Make
+        # 4. Lancement du Build final
         echo "[+] Lancement de la compilation globale forcée..."
         make -j$(nproc --all) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip CONFIG_KERNELSU=y CONFIG_KSU=y || BUILD_FAILED=true
         
