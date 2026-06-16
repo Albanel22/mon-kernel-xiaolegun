@@ -80,7 +80,7 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace
         git clone --recursive ${{ env.KERNEL_SOURCE }} -b ${{ env.KERNEL_SOURCE_BRANCH }} android-kernel --depth=1
 
-    - name: Intégration et Patching de KernelSU (${{ env.KERNELSU_TAG }})
+        - name: Intégration et Patching de KernelSU (${{ env.KERNELSU_TAG }})
       if: env.ENABLE_KERNELSU == 'true'
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
@@ -93,10 +93,10 @@ jobs:
             sed -i '/int do_dentry_open(/,/^[}]/s/return 0;/{ extern int ksu_handle_open(struct file *file); ksu_handle_open(f); } return 0;/g' fs/open.c
         fi
 
-        # Activation dans le Makefile des drivers
+        # Activation dans le Makefile des drivers (Correction du chemin vers /kernel)
         if [ -f "drivers/Makefile" ]; then
             sed -i '/kernelsu/d' drivers/Makefile
-            echo "obj-y += kernelsu/" >> drivers/Makefile
+            echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
