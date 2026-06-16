@@ -136,6 +136,11 @@ jobs:
             echo "CONFIG_MODULE_SIG_FORCE=n" >> $CONFIG_PATH
             echo "CONFIG_MODULE_SIG_PERMISSIVE=y" >> $CONFIG_PATH
             echo "CONFIG_MODULE_SIG_ALL=n" >> $CONFIG_PATH
+            echo "CONFIG_STRICT_KERNEL_RWX=n" >> $CONFIG_PATH
+            echo "CONFIG_DEBUG_LIST=n" >> $CONFIG_PATH
+            # Désactivation forcée de l'intégrité pour éviter le crash au démarrage
+            echo "CONFIG_DM_VERITY=n" >> $CONFIG_PATH
+            echo "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIGNATURE=n" >> $CONFIG_PATH
             
             echo "[+] Configuration finale du defconfig validée."
         else
