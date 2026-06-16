@@ -107,10 +107,10 @@ jobs:
             echo "obj-y += kernelsu/kernel/" >> drivers/Makefile
         fi
 
-        # Liaison dans le Kconfig pour enregistrer l'option auprès du compilateur
+        # Liaison dans le Kconfig (Correction du chemin vers /kernel/)
         if [ -f "drivers/Kconfig" ]; then
             sed -i '/kernelsu/d' drivers/Kconfig
-            echo 'source "drivers/kernelsu/Kconfig"' >> drivers/Kconfig
+            echo 'source "drivers/kernelsu/kernel/Kconfig"' >> drivers/Kconfig
         fi
 
     - name: Intégration et Patching Anti-Détection SusFS
@@ -154,7 +154,7 @@ jobs:
         # 1. Génération de la configuration brute (.config)
         make -j$(nproc) O=out ARCH=${{ env.ARCH }} ${{ env.GCC_64_FLAG }} ${{ env.GCC_32_FLAG }} CLANG_TRIPLE=aarch64-linux-gnu- CC=clang OBJCOPY=llvm-objcopy STRIP=llvm-strip ${{ env.KERNEL_CONFIG }}
         
-        # 1b. Ceinture et bretelles : Injection de force post-génération brute
+        # 1b. Injection de force post-génération brute
         if [ "${{ env.ENABLE_KERNELSU }}" = "true" ]; then
             echo "CONFIG_KERNELSU=y" >> out/.config
         fi
@@ -200,3 +200,4 @@ jobs:
       with:
         name: KernelSU_${{ env.KERNELSU_TAG }}_SusFS-${{ env.KERNEL_IMAGE_NAME }}
         path: kernel_workspace/AnyKernel3/*
+        
