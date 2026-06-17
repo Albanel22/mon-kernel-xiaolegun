@@ -1,130 +1,105 @@
-name: Build Kernel Personnalisé Motorola KernelSU + SusFS
+name: Build Kernel with KernelSU
 
 on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-latest
     steps:
-    - name: Configuration de l'environnement de build
+    - name: Maximiser l'espace disque
+      uses: easimon/maximize-build-space@master
+      with:
+        root-reserve-mb: 5120
+        swap-size-mb: 1024
+        remove-dotnet: 'true'
+        remove-android: 'true'
+        remove-haskell: 'true'
+
+    - name: Checkout du code
+      uses: actions/checkout@v4
+
+    - name: Installation des dépendances système
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev xz-utils zlib1g-dev g++-multilib libxml2-utils bison flex git zip unzip curl liblz4-tool lzma
-        
-    - name: Chargement des Variables de Configuration
-      run: |
-        # Configuration des dépôts par défaut pour AnyKernel3
-        echo "CUSTOM_ANYKERNEL3_SOURCE=https://github.com/osm0sis/AnyKernel3" >> $GITHUB_ENV
-        echo "CUSTOM_ANYKERNEL3_BRANCH=master" >> $GITHUB_ENV
+        sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev xz-utils bison flex libelf-dev git lld llvm
 
-    - name: Récupération du Code Source du Noyau (Kernel)
+    - name: Préparation de l'environnement de travail
       run: |
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
         cd $GITHUB_WORKSPACE/kernel_workspace
-        echo "[+] Clonage du dépôt LineageOS Motorola sm8250..."
-        git clone https://github.com/LineageOS/android_kernel_motorola_sm8250.git -b lineage-21 android-kernel --depth=1
-
-    - name: Récupération de la Toolchain (Clang/Gcc)
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace
+        
         echo "[+] Téléchargement de la Toolchain AOSP Clang..."
         git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b master-kernel-build-2022 clang --depth=1
+        
+        echo "[+] Téléchargement du code source du Noyau..."
+        git clone https://github.com/xiaolegun/android_kernel_motorola_kona.git -b u-rel android-kernel --depth=1
 
-    - name: Injection et Patch de KernelSU & SusFS
+    - name: Intégration de KernelSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        echo "[+] Initialisation et injection du code KernelSU officiel..."
-        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
+        echo "[+] Installation de KernelSU..."
+        curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
 
-    - name: Configuration du Defconfig (Bannissement des verrous Motorola)
+    - name: Configuration du Defconfig et Patches Drivers
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        echo "[+] Réparation chirurgicale du pilote tactile Synaptics..."
+        # 1. APPLICATION DU PATCH TACTILE SYNAPTICS
         TARGET_SYNAPTICS="drivers/input/touchscreen/synaptics_dsx/synaptics_dsx_rmi_dev.c"
         if [ -f "$TARGET_SYNAPTICS" ]; then
-            # 1. On s'assure que l'en-tête pour send_sig est présent en haut du fichier (à la ligne 2)
+            echo "[+] Patch du pilote tactile Synaptics..."
             sed -i '/linux\/sched\/signal.h/d' $TARGET_SYNAPTICS
             sed -i '2i #include <linux/sched/signal.h>' $TARGET_SYNAPTICS
-            
-            # 2. On applique les remplacements propres vers la fonction send_sig
             sed -i 's/send_sig_info(SIGTERM, \&rmidev->terminate_signal, rmidev->task);/send_sig(SIGTERM, rmidev->task, 0);/g' $TARGET_SYNAPTICS
             sed -i 's/send_sig_info(SIGIO, \&rmidev->interrupt_signal, rmidev->task);/send_sig(SIGIO, rmidev->task, 0);/g' $TARGET_SYNAPTICS
-            
-            echo "[✓] Modifications de sécurité appliquées sur Synaptics."
         fi
 
-        # Recherche et ciblage automatique du fichier defconfig de la plateforme
+        # 2. CONFIGURATION DU DEFCONFIG
         CONFIG_PATH="arch/arm64/configs/vendor/kona-perf_defconfig"
-        if [ ! -f "$CONFIG_PATH" ]; then
-            CONFIG_PATH=$(find arch/arm64/configs/ -name "*defconfig" | head -n 1)
-        fi
-        echo "[+] Fichier de configuration ciblé : $CONFIG_PATH"
         
-        echo "[+] Nettoyage des anciennes configurations..."
+        echo "[+] Nettoyage et injection des options KernelSU..."
         sed -i '/CONFIG_KERNELSU/d' $CONFIG_PATH
         sed -i '/CONFIG_KSU/d' $CONFIG_PATH
         sed -i '/CONFIG_KPROBES/d' $CONFIG_PATH
         sed -i '/CONFIG_OVERLAY_FS/d' $CONFIG_PATH
-        sed -i '/CONFIG_MODULE_SIG/d' $CONFIG_PATH
-        sed -i '/CONFIG_KALLSYMS/d' $CONFIG_PATH
-        sed -i '/CONFIG_DM_VERITY/d' $CONFIG_PATH
         
-        echo "[+] Injection des pré-requis obligatoires pour KernelSU..."
         echo "CONFIG_KERNELSU=y" >> $CONFIG_PATH
         echo "CONFIG_KSU=y" >> $CONFIG_PATH
         echo "CONFIG_KPROBES=y" >> $CONFIG_PATH
         echo "CONFIG_OVERLAY_FS=y" >> $CONFIG_PATH
         
-        echo "[+] Activation de la cartographie complète du noyau..."
-        echo "CONFIG_KALLSYMS=y" >> $CONFIG_PATH
-        echo "CONFIG_KALLSYMS_ALL=y" >> $CONFIG_PATH
-        
-        echo "[+] Désactivation des verrous de signature LineageOS/Motorola (Anti-Bootloop)..."
+        echo "[+] Désactivation des sécurités contraignantes (Anti-bootloop & Intégrité)..."
+        sed -i '/CONFIG_MODULE_SIG/d' $CONFIG_PATH
+        sed -i '/CONFIG_DM_VERITY/d' $CONFIG_PATH
         echo "CONFIG_MODULE_SIG=n" >> $CONFIG_PATH
         echo "CONFIG_MODULE_SIG_FORCE=n" >> $CONFIG_PATH
-        echo "CONFIG_MODULE_SIG_PERMISSIVE=y" >> $CONFIG_PATH
-        echo "CONFIG_MODULE_SIG_ALL=n" >> $CONFIG_PATH
-        
-        echo "[+] Désactivation des verrous de sécurité d'intégrité (AVB / DM-Verity)..."
-        echo "CONFIG_STRICT_KERNEL_RWX=n" >> $CONFIG_PATH
-        echo "CONFIG_DEBUG_LIST=n" >> $CONFIG_PATH
         echo "CONFIG_DM_VERITY=n" >> $CONFIG_PATH
-        echo "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIGNATURE=n" >> $CONFIG_PATH
-        
-        echo "[+] Configuration finale du defconfig validée."
-        
+
     - name: Compilation du Noyau (Build)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # Correction du chemin avec le 'e' officiel trouvé dans les logs
+        # Configuration des chemins d'accès vers la Toolchain officielle r450784e
         export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784e
         export PATH=$CLANG_DIR/bin:$PATH
         
-        # Filet de sécurité pour le VDSO (Garantit que lld/llvm fonctionnent quoi qu'il arrive)
-        echo "[+] Installation des utilitaires système complémentaires..."
-        sudo apt-get update && sudo apt-get install -y lld llvm
-        
-        # Forçage des liens de secours vers la bonne Toolchain Google
+        # Forçage des outils pour le module VDSO
         sudo ln -sf $CLANG_DIR/bin/ld.lld /usr/bin/ld.lld
         sudo ln -sf $CLANG_DIR/bin/llvm-objdump /usr/bin/llvm-objdump
         sudo ln -sf $CLANG_DIR/bin/llvm-objcopy /usr/bin/llvm-objcopy
         
         export ARCH=arm64
         export SUBARCH=arm64
-        
-        # Déclaration de l'écosystème de compilation AOSP
         export CC=clang
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         
-        echo "[+] Génération de la configuration initiale (Defconfig)..."
+        echo "[+] Génération du fichier .config..."
         make O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
-        echo "[+] Lancement de la compilation complète (Toolchain r450784e)..."
+        echo "[+] Lancement de la compilation avec protection contre les erreurs..."
         make -j$(nproc) O=out \
           CC=clang \
           LLVM=1 \
@@ -132,48 +107,25 @@ jobs:
           CLANG_TRIPLE=aarch64-linux-gnu- \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-          KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error"
-          
-    - name: Empaquetage flashable universel avec AnyKernel3
+          KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration"
+
+    - name: Préparation de AnyKernel3
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
-        echo "[+] Récupération de AnyKernel3..."
-        git clone ${{ env.CUSTOM_ANYKERNEL3_SOURCE }} -b ${{ env.CUSTOM_ANYKERNEL3_BRANCH }} AnyKernel3 --depth=1
+        git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
         
-        echo "[+] Configuration des scripts AnyKernel3..."
-        sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-        sed -i 's!BLOCK=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!BLOCK=auto;!g' AnyKernel3/anykernel.sh
-        sed -i 's/IS_SLOT_DEVICE=0;/is_slot_device=auto;/g' AnyKernel3/anykernel.sh
-        
-        echo "[+] Traitement du noyau brut (Format Image exigé par AIK/Motorola)..."
-        KERNEL_RAW="android-kernel/out/arch/arm64/boot/Image"
-        
-        if [ -f "$KERNEL_RAW" ]; then
-            echo "[+] Succès : Noyau brut trouvé dans les dossiers de build."
-            cp "$KERNEL_RAW" AnyKernel3/Image
-            echo "ZIP_READY=true" >> $GITHUB_ENV
+        # Vérification et copie du fichier Image.gz généré
+        IMAGE_PATH="$GITHUB_WORKSPACE/kernel_workspace/android-kernel/out/arch/arm64/boot/Image.gz"
+        if [ -f "$IMAGE_PATH" ]; then
+            cp $IMAGE_PATH AnyKernel3/
+            echo "[✓] Image.gz copiée avec succès dans AnyKernel3."
         else
-            echo "[-] Alerte : Le fichier brut 'Image' est introuvable au chemin principal."
-            KERNEL_ALT=$(find android-kernel/out/arch/arm64/boot/ -maxdepth 1 -type f -name "Image*" | head -n 1)
-            if [ -n "$KERNEL_ALT" ]; then
-                echo "[+] Fichier alternatif trouvé : $KERNEL_ALT -> Forçage au format 'Image'"
-                cp "$KERNEL_ALT" AnyKernel3/Image
-                echo "ZIP_READY=true" >> $GITHUB_ENV
-            else
-                echo "[-] Erreur critique : Aucun binaire de noyau n'a été généré."
-                exit 1
-            fi
+            echo "[X] Erreur critique : Fichier Image.gz introuvable après la compilation !"
+            exit 1
         fi
 
-    - name: Création et Publication de l'Archive Flashable (Artifact)
-      if: env.ZIP_READY == 'true'
-      run: |
-        cd $GITHUB_WORKSPACE/kernel_workspace/AnyKernel3
-        zip -r9 ../KernelSU_v0.9.5_Motorola_sm8250_Image.zip *
-        
-    - name: Téléversement de l'Artifact vers GitHub
-      if: env.ZIP_READY == 'true'
+    - name: Téléversement du Kernel Flashable (Artifact)
       uses: actions/upload-artifact@v4
       with:
-        name: KernelSU_v0.9.5_Motorola_sm8250_Image
-        path: kernel_workspace/KernelSU_v0.9.5_Motorola_sm8250_Image.zip
+        name: Kernel_Kona_KernelSU
+        path: ${{ github.workspace }}/kernel_workspace/AnyKernel3/*
