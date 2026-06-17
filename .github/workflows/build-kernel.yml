@@ -84,36 +84,23 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # 1. Vérification cruciale de la Toolchain
-        export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784d
-        echo "=== DIAGNOSTIC TOOLCHAIN ==="
-        if [ -d "$CLANG_DIR" ]; then
-          echo "[✓] Le dossier Clang existe."
-          ls -l $CLANG_DIR/bin/ld.lld || echo "[X] ld.lld absent de la toolchain !"
-          ls -l $CLANG_DIR/bin/llvm-objdump || echo "[X] llvm-objdump absent de la toolchain !"
-        else
-          echo "[X] Erreur : Le dossier $CLANG_DIR n'existe pas !"
-          echo "Contenu de kernel_workspace/clang/ :"
-          ls -l $GITHUB_WORKSPACE/kernel_workspace/clang/ || echo "Dossier clang vide ou inexistant"
-        fi
-        echo "============================"
-
-        # 2. FILET DE SÉCURITÉ : Installation des outils LLVM natifs d'Ubuntu
-        # Si le Makefile refuse la toolchain Google pour le VDSO, il prendra celle du système
-        echo "[+] Installation de lld et llvm natifs au cas où..."
-        sudo apt-get update && sudo apt-get install -y lld llvm
-
-        # 3. Liens symboliques vers la toolchain Google (si elle est valide)
-        if [ -f "$CLANG_DIR/bin/ld.lld" ]; then
-          sudo ln -sf $CLANG_DIR/bin/ld.lld /usr/bin/ld.lld
-          sudo ln -sf $CLANG_DIR/bin/llvm-objdump /usr/bin/llvm-objdump
-          sudo ln -sf $CLANG_DIR/bin/llvm-objcopy /usr/bin/llvm-objcopy
-        fi
-
-        # 4. Configuration des variables d'environnement
+        # Correction du chemin avec le 'e' officiel trouvé dans les logs
+        export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784e
         export PATH=$CLANG_DIR/bin:$PATH
+        
+        # Filet de sécurité pour le VDSO (Garantit que lld/llvm fonctionnent quoi qu'il arrive)
+        echo "[+] Installation des utilitaires système complémentaires..."
+        sudo apt-get update && sudo apt-get install -y lld llvm
+        
+        # Forçage des liens de secours vers la bonne Toolchain Google
+        sudo ln -sf $CLANG_DIR/bin/ld.lld /usr/bin/ld.lld
+        sudo ln -sf $CLANG_DIR/bin/llvm-objdump /usr/bin/llvm-objdump
+        sudo ln -sf $CLANG_DIR/bin/llvm-objcopy /usr/bin/llvm-objcopy
+        
         export ARCH=arm64
         export SUBARCH=arm64
+        
+        # Déclaration de l'écosystème de compilation AOSP
         export CC=clang
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
@@ -122,7 +109,7 @@ jobs:
         echo "[+] Génération de la configuration initiale (Defconfig)..."
         make O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
-        echo "[+] Lancement de la compilation complète..."
+        echo "[+] Lancement de la compilation complète (Toolchain r450784e)..."
         make -j$(nproc) O=out \
           CC=clang \
           LLVM=1 \
