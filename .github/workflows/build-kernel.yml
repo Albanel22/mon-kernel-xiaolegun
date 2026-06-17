@@ -33,8 +33,9 @@ jobs:
         git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b master-kernel-build-2022 clang --depth=1
         
         echo "[+] Téléchargement du code source du Noyau..."
-        git clone https://github.com/xiaolegun/android_kernel_motorola_kona.git -b u-rel android-kernel --depth=1
-
+        # Correction ici : sm8250 à la place de kona
+        git clone https://github.com/xiaolegun/android_kernel_motorola_sm8250.git -b u-rel android-kernel --depth=1
+        
     - name: Intégration de KernelSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
