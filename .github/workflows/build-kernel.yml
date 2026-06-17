@@ -41,19 +41,18 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        echo "[+] Réparation en profondeur du pilote tactile Synaptics..."
+        echo "[+] Réparation chirurgicale du pilote tactile Synaptics..."
         TARGET_SYNAPTICS="drivers/input/touchscreen/synaptics_dsx/synaptics_dsx_rmi_dev.c"
         if [ -f "$TARGET_SYNAPTICS" ]; then
-            # On nettoie l'ancien include de secours inutile
+            # 1. On s'assure que l'en-tête pour send_sig est présent en haut du fichier (à la ligne 2)
             sed -i '/linux\/sched\/signal.h/d' $TARGET_SYNAPTICS
+            sed -i '2i #include <linux/sched/signal.h>' $TARGET_SYNAPTICS
             
-            # On remplace les appels à send_sig_info par la fonction moderne send_sig
-            # Ligne ~426 : SIGTERM
+            # 2. On applique les remplacements propres vers la fonction send_sig
             sed -i 's/send_sig_info(SIGTERM, \&rmidev->terminate_signal, rmidev->task);/send_sig(SIGTERM, rmidev->task, 0);/g' $TARGET_SYNAPTICS
-            # Ligne ~809 : SIGIO
             sed -i 's/send_sig_info(SIGIO, \&rmidev->interrupt_signal, rmidev->task);/send_sig(SIGIO, rmidev->task, 0);/g' $TARGET_SYNAPTICS
             
-            echo "[✓] Remplacement de send_sig_info par send_sig effectué."
+            echo "[✓] Modifications de sécurité appliquées sur Synaptics."
         fi
 
         # Recherche et ciblage automatique du fichier defconfig de la plateforme
