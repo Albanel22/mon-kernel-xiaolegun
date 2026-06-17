@@ -16,7 +16,7 @@ jobs:
         remove-android: 'true'
         remove-haskell: 'true'
 
-    - name: Checkout du code
+    - name: Checkout du code (Ton dépôt de workflow)
       uses: actions/checkout@v4
 
     - name: Installation des dépendances système
@@ -24,18 +24,20 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev xz-utils bison flex libelf-dev git lld llvm
 
-    - name: Préparation de l'environnement de travail
+    - name: Téléchargement du code source du Noyau (via Checkout)
+      uses: actions/checkout@v4
+      with:
+        repository: 'xiaolegun/android_kernel_motorola_sm8250'
+        ref: 'u-rel'
+        path: 'kernel_workspace/android-kernel'
+        fetch-depth: 1
+
+    - name: Téléchargement de la Toolchain AOSP Clang
       run: |
         mkdir -p $GITHUB_WORKSPACE/kernel_workspace
         cd $GITHUB_WORKSPACE/kernel_workspace
-        
         echo "[+] Téléchargement de la Toolchain AOSP Clang..."
         git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 -b master-kernel-build-2022 clang --depth=1
-        
-        echo "[+] Téléchargement du code source du Noyau..."
-        # Correction ici : sm8250 à la place de kona
-        git clone https://github.com/xiaolegun/android_kernel_motorola_sm8250.git -b u-rel android-kernel --depth=1
-        
     - name: Intégration de KernelSU
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
