@@ -83,36 +83,37 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # 1. Configuration des variables de chemin absolu
+        # 1. Définition et EXPORTATION du PATH au niveau du système (CRUCIAL)
         export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784e
+        export PATH=$CLANG_DIR/bin:$PATH
         
-        # 2. Liens symboliques requis pour le sous-système VDSO
-        sudo ln -sf $CLANG_DIR/bin/ld.lld /usr/bin/ld.lld
-        sudo ln -sf $CLANG_DIR/bin/llvm-objdump /usr/bin/llvm-objdump
-        sudo ln -sf $CLANG_DIR/bin/llvm-objcopy /usr/bin/llvm-objcopy
-        
-        # 3. Variables d'architecture
+        # 2. Variables d'architecture
         export ARCH=arm64
         export SUBARCH=arm64
         
-        echo "[+] Génération du fichier .config avec Clang AOSP..."
+        echo "[+] Génération du fichier .config..."
+        # L'ajout de HOSTCC=gcc force la compilation des outils hôtes avec les bons headers (fixe l'erreur elf.h)
         make O=out \
-          CC=$CLANG_DIR/bin/clang \
+          HOSTCC=gcc \
+          HOSTCXX=g++ \
+          CC=clang \
           CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=$CLANG_DIR/bin/aarch64-linux-gnu- \
-          CROSS_COMPILE_COMPAT=$CLANG_DIR/bin/arm-linux-gnueabi- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
           vendor/kona-perf_defconfig
         
-        echo "[+] Lancement de la compilation complète (Méthode Inline Binaries)..."
+        echo "[+] Lancement de la compilation complète..."
         make -j$(nproc) O=out \
-          CC=$CLANG_DIR/bin/clang \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=$CLANG_DIR/bin/aarch64-linux-gnu- \
-          CROSS_COMPILE_COMPAT=$CLANG_DIR/bin/arm-linux-gnueabi- \
+          HOSTCC=gcc \
+          HOSTCXX=g++ \
+          CC=clang \
           LLVM=1 \
           LLVM_IAS=1 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
           KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error -Wno-implicit-function-declaration -Wno-error=implicit-function-declaration"
-          
+
     - name: Préparation de AnyKernel3
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
