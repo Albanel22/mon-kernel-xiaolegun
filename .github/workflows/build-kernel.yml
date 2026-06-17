@@ -83,39 +83,25 @@ jobs:
     - name: Compilation du Noyau (Build)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784d/bin:$PATH
+        
+        # Ajout du dossier principal de Clang et de son sous-dossier binaire éventuel au PATH
+        export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784d
+        export PATH=$CLANG_DIR/bin:$PATH
+        
         export ARCH=arm64
         export SUBARCH=arm64
         
-        # Définition complète des outils LLVM pour éviter les conflits d'assembleur
+        # Configuration globale avec l'écosystème LLVM
         export CC=clang
-        export LD=ld.lld
-        export AR=llvm-ar
-        export NM=llvm-nm
-        export OBJCOPY=llvm-objcopy
-        export OBJDUMP=llvm-objdump
-        export STRIP=llvm-strip
+        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         
-        echo "[+] Lancement de la génération du fichier de configuration..."
-        make O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
+        echo "[+] Génération de la configuration initiale (Defconfig)..."
+        make O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
-        echo "[+] Compilation du noyau avec l'écosystème LLVM complet..."
-        make -j$(nproc) O=out \
-          CC=clang \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump \
-          STRIP=llvm-strip \
-          CLANG_TRIPLE=aarch64-linux-gnu- \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
-          LLVM=1 \
-          LLVM_IAS=1 \
-          KCFLAGS="-w" \
-          HOSTCFLAGS="-w"
-
+        echo "[+] Lancement de la compilation complète avec flags de contournement..."
+        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error"
 
 
     - name: Empaquetage flashable universel avec AnyKernel3
