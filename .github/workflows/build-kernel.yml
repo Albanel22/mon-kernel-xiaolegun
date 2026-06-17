@@ -87,19 +87,35 @@ jobs:
         export ARCH=arm64
         export SUBARCH=arm64
         
-        # Définition des variables globales pour Clang
+        # Définition complète des outils LLVM pour éviter les conflits d'assembleur
         export CC=clang
         export LD=ld.lld
-        export CLANG_TRIPLE=aarch64-linux-gnu-
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
+        export AR=llvm-ar
+        export NM=llvm-nm
+        export OBJCOPY=llvm-objcopy
+        export OBJDUMP=llvm-objdump
+        export STRIP=llvm-strip
         
-        echo "[+] Lancement de la génération du fichier de configuration avec Clang..."
+        echo "[+] Lancement de la génération du fichier de configuration..."
         make O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
-        echo "[+] Compilation en cours (Mode permissif total)..."
-        # -w désactive toutes les alertes transformées en erreurs sur la cible ET sur l'hôte (DTC)
-        make -j$(nproc) O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w" HOSTCFLAGS="-w"
+        echo "[+] Compilation du noyau avec l'écosystème LLVM complet..."
+        make -j$(nproc) O=out \
+          CC=clang \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          KCFLAGS="-w" \
+          HOSTCFLAGS="-w"
+
 
 
     - name: Empaquetage flashable universel avec AnyKernel3
