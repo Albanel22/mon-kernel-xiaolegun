@@ -86,14 +86,19 @@ jobs:
         export PATH=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784d/bin:$PATH
         export ARCH=arm64
         export SUBARCH=arm64
+        
+        # On définit les variables globales pour utiliser Clang de A à Z
+        export CC=clang
+        export LD=ld.lld
+        export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         
-        echo "[+] Lancement de la génération du fichier de configuration..."
-        make O=out vendor/kona-perf_defconfig
+        echo "[+] Lancement de la génération du fichier de configuration avec Clang..."
+        make O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
         echo "[+] Compilation en cours (Veuillez patienter)..."
-        make -j$(nproc) O=out CC=clang CLANG_TRIPLE=aarch64-linux-gnu-
+        make -j$(nproc) O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
 
     - name: Empaquetage flashable universel avec AnyKernel3
       run: |
