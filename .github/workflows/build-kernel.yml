@@ -84,26 +84,42 @@ jobs:
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         
-        # Ajout du dossier principal de Clang et de son sous-dossier binaire éventuel au PATH
+        # Définition propre du dossier Clang et injection dans le PATH
         export CLANG_DIR=$GITHUB_WORKSPACE/kernel_workspace/clang/clang-r450784d
         export PATH=$CLANG_DIR/bin:$PATH
         
         export ARCH=arm64
         export SUBARCH=arm64
         
-        # Configuration globale avec l'écosystème LLVM
+        # Variables d'environnement standard pour Clang
         export CC=clang
         export CLANG_TRIPLE=aarch64-linux-gnu-
         export CROSS_COMPILE=aarch64-linux-gnu-
         export CROSS_COMPILE_COMPAT=arm-linux-gnueabi-
         
+        # Forçage des outils LLVM au cas où le script VDSO les appelle en brut
+        export LD=ld.lld
+        export OBJCOPY=llvm-objcopy
+        export OBJDUMP=llvm-objdump
+        export STRIP=llvm-strip
+        
         echo "[+] Génération de la configuration initiale (Defconfig)..."
         make O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
         echo "[+] Lancement de la compilation complète avec flags de contournement..."
-        make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error"
-
-
+        make -j$(nproc) O=out \
+          CC=clang \
+          LLVM=1 \
+          LLVM_IAS=1 \
+          CLANG_TRIPLE=aarch64-linux-gnu- \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_COMPAT=arm-linux-gnueabi- \
+          LD=ld.lld \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip \
+          KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error"
+          
     - name: Empaquetage flashable universel avec AnyKernel3
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace
