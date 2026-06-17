@@ -40,6 +40,15 @@ jobs:
     - name: Configuration du Defconfig (Bannissement des verrous Motorola)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
+        
+        echo "[+] Réparation cosmétique du pilote tactile Synaptics (Correction send_sig_info)..."
+        TARGET_SYNAPTICS="drivers/input/touchscreen/synaptics_dsx/synaptics_dsx_rmi_dev.c"
+        if [ -f "$TARGET_SYNAPTICS" ]; then
+            # On insère l'include nécessaire à la ligne 2 du fichier
+            sed -i '2i #include <linux/sched/signal.h>' $TARGET_SYNAPTICS
+            echo "[✓] Correction Synaptics appliquée."
+        fi
+
         # Recherche et ciblage automatique du fichier defconfig de la plateforme
         CONFIG_PATH="arch/arm64/configs/vendor/kona-perf_defconfig"
         if [ ! -f "$CONFIG_PATH" ]; then
@@ -79,7 +88,6 @@ jobs:
         echo "CONFIG_DM_VERITY_VERIFY_ROOTHASH_SIGNATURE=n" >> $CONFIG_PATH
         
         echo "[+] Configuration finale du defconfig validée."
-
     - name: Compilation du Noyau (Build)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
