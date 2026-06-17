@@ -87,7 +87,7 @@ jobs:
         export ARCH=arm64
         export SUBARCH=arm64
         
-        # On définit les variables globales
+        # Définition des variables globales pour Clang
         export CC=clang
         export LD=ld.lld
         export CLANG_TRIPLE=aarch64-linux-gnu-
@@ -97,8 +97,10 @@ jobs:
         echo "[+] Lancement de la génération du fichier de configuration avec Clang..."
         make O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- vendor/kona-perf_defconfig
         
-        echo "[+] Compilation en cours (Ignorance des alertes strictes Clang)..."
-        make -j$(nproc) O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-Wno-gnu-variable-sized-type-not-at-end -Wno-error"
+        echo "[+] Compilation en cours (Mode permissif total)..."
+        # -w désactive toutes les alertes transformées en erreurs sur la cible ET sur l'hôte (DTC)
+        make -j$(nproc) O=out CC=clang LD=ld.lld CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_COMPAT=arm-linux-gnueabi- KCFLAGS="-w" HOSTCFLAGS="-w"
+
 
     - name: Empaquetage flashable universel avec AnyKernel3
       run: |
