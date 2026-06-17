@@ -10,11 +10,11 @@ jobs:
     - name: Configuration de l'environnement de build
       run: |
         sudo apt-get update
-        sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev xz-utils zlib1g-dev g++-multilib libxml2-utils stdint.h format-dev bison flex git zip unzip curl liblz4-tool lzma
+        sudo apt-get install -y bc build-essential libncurses5-dev libssl-dev xz-utils zlib1g-dev g++-multilib libxml2-utils bison flex git zip unzip curl liblz4-tool lzma
         
     - name: Chargement des Variables de Configuration
       run: |
-        # On charge ton fichier de configuration s'il existe, sinon on définit les bases
+        # Configuration des dépôts par défaut pour AnyKernel3
         echo "CUSTOM_ANYKERNEL3_SOURCE=https://github.com/osm0sis/AnyKernel3" >> $GITHUB_ENV
         echo "CUSTOM_ANYKERNEL3_BRANCH=master" >> $GITHUB_ENV
 
@@ -36,22 +36,15 @@ jobs:
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
         echo "[+] Initialisation et injection du code KernelSU officiel..."
         curl -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s main
-        
-        echo "[+] Application des patchs SusFS anti-détection..."
-        # Utilisation du script automatique ou manuel selon tes fichiers
-        # (Cette étape suppose que ton dépôt intègre les fichiers SusFS requis)
 
     - name: Configuration du Defconfig (Bannissement des verrous Motorola)
       run: |
         cd $GITHUB_WORKSPACE/kernel_workspace/android-kernel
-        # Remplace 'vendor/kona-perf_defconfig' par ton defconfig exact si nécessaire
+        # Recherche et ciblage automatique du fichier defconfig de la plateforme
         CONFIG_PATH="arch/arm64/configs/vendor/kona-perf_defconfig"
-        
         if [ ! -f "$CONFIG_PATH" ]; then
-            # Repli si le chemin kona-perf n'est pas le bon
             CONFIG_PATH=$(find arch/arm64/configs/ -name "*defconfig" | head -n 1)
         fi
-        
         echo "[+] Fichier de configuration ciblé : $CONFIG_PATH"
         
         echo "[+] Nettoyage des anciennes configurations..."
